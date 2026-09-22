@@ -15,6 +15,24 @@ namespace nil {
                 template<class CppInt1, class CppInt2, class CppInt3>
                 BOOST_MP_CXX14_CONSTEXPR void
                     divide_unsigned_helper(CppInt1* result, const CppInt2& x, const CppInt3& y, CppInt1& r) {
+#ifndef BOOST_MP_NO_CONSTEXPR_DETECTION
+                    if (BOOST_MP_IS_CONST_EVALUATED(x)) {
+                        // Constant evaluation: the cross-object void* identity
+                        // checks on the runtime path below are not core constant
+                        // expressions - comparing pointers into different objects
+                        // has an unspecified result - and the EL8 llvm-toolset
+                        // clang (21.1.8) rejects constant evaluations that reach
+                        // them, breaking consumers whose field constants fold
+                        // 160/192/224/256-bit divisions at compile time. Unconditional
+                        // copies make aliasing impossible, which is exactly what
+                        // the guarded runtime path exists to prevent, so the
+                        // guards are simply unnecessary here.
+                        CppInt2 x_copy(x);
+                        CppInt3 y_copy(y);
+                        divide_unsigned_helper_core(result, x_copy, y_copy, r);
+                        return;
+                    }
+#endif
                     if (((void*)result == (void*)&x) || ((void*)&r == (void*)&x)) {
                         CppInt2 t(x);
                         divide_unsigned_helper(result, t, y, r);
@@ -25,7 +43,19 @@ namespace nil {
                         divide_unsigned_helper(result, x, t, r);
                         return;
                     }
+                    divide_unsigned_helper_core(result, x, y, r);
+                }
 
+                // Long-division core: the historical divide_unsigned_helper body
+                // without the operand-aliasing guards. Callers must pass
+                // non-aliased operands - the public divide_unsigned_helper
+                // above guarantees that (guarded copies at runtime, unconditional
+                // copies in constant evaluation).
+                template<class CppInt1, class CppInt2, class CppInt3>
+                BOOST_MP_CXX14_CONSTEXPR void divide_unsigned_helper_core( CppInt1*       result,
+                                                                          const CppInt2 &x,
+                                                                          const CppInt3 &y,
+                                                                          CppInt1       &r ) {
                     /*
                      Very simple, fairly braindead long division.
                      Start by setting the remainder equal to x, and the
